@@ -44,7 +44,7 @@
     /* LOADING */
     #loading-overlay {
       position: fixed; inset: 0;
-      background: rgba(10,45,110,0.88);
+      background: rgba(10,45,110,0.92);
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
       z-index: 9999; color: white;
@@ -58,7 +58,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     #loading-overlay.hidden { display: none; }
-    #loading-msg { margin-top: 10px; font-size: 12px; opacity: 0.8; }
+    #loading-msg { margin-top: 10px; font-size: 11px; opacity: 0.7; letter-spacing: 1px; }
 
     label {
       font-weight: bold; display: block; margin-top: 20px;
@@ -99,7 +99,7 @@
     .autocomplete-item:hover, .autocomplete-item.highlighted {
       background: var(--azul-claro); color: var(--azul-cahpsa);
     }
-    .autocomplete-item .match-highlight {
+    .match-highlight {
       background: rgba(26,79,160,0.18); color: var(--azul-cahpsa);
       font-weight: 900; border-radius: 2px; padding: 0 1px;
     }
@@ -145,7 +145,7 @@
     .btn-add {
       background: var(--azul-cahpsa); color: white; width: 100%;
       padding: 15px; border: none; border-radius: 8px; cursor: pointer;
-      font-weight: bold; margin-top: 10px; letter-spacing: 1px; transition: background 0.2s;
+      font-weight: bold; margin-top: 10px; letter-spacing: 1px;
     }
     .btn-add:hover { background: var(--azul-medio); }
     .btn-remove {
@@ -169,7 +169,7 @@
       width: 100%; background: var(--azul-cahpsa); color: white;
       margin-top: 40px; font-size: 17px; padding: 22px;
       border: none; border-radius: 12px; cursor: pointer;
-      font-weight: bold; letter-spacing: 2px; transition: background 0.2s;
+      font-weight: bold; letter-spacing: 2px;
     }
     .btn-enviar:hover { background: var(--azul-medio); }
     .btn-enviar:disabled { background: #9ab; cursor: not-allowed; }
@@ -180,7 +180,7 @@
 <div id="loading-overlay">
   <div class="spinner"></div>
   <span>CARGANDO DATOS CAHPSA...</span>
-  <div id="loading-msg"></div>
+  <div id="loading-msg">CONECTANDO CON GOOGLE SHEETS</div>
 </div>
 
 <div class="container">
@@ -259,7 +259,7 @@
 
 <script>
 // ================================================================
-//  CONFIGURACIÓN
+//  *** ACTUALIZÁ ESTA URL CON TU NUEVA IMPLEMENTACIÓN ***
 // ================================================================
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzCCzGrIHofXlZREKuKek0bkO0rXsD-VjdBjELWfEkq-CbWdhJIIL4hETYuk8q8H1ULBg/exec";
 
@@ -268,62 +268,50 @@ let PRODUCTOS_VALIDOS = [];
 let todosLosRelevadores = [];
 
 // ================================================================
-//  CARGA DE DATOS VÍA JSONP (evita bloqueo CORS desde GitHub Pages)
+//  CARGA VÍA JSONP PURO (único método — sin fetch, evita CORS)
 // ================================================================
-function cargarDatosJSONP() {
-  return new Promise(function(resolve, reject) {
-    const callbackName = "cahpsaCallback_" + Date.now();
-    const script = document.createElement("script");
-    let timeout;
-
-    window[callbackName] = function(data) {
-      clearTimeout(timeout);
-      document.body.removeChild(script);
-      delete window[callbackName];
-      resolve(data);
-    };
-
-    timeout = setTimeout(function() {
-      if (document.body.contains(script)) document.body.removeChild(script);
-      delete window[callbackName];
-      reject(new Error("Timeout al cargar datos"));
-    }, 15000);
-
-    script.src = SCRIPT_URL + "?action=getData&callback=" + callbackName;
-    script.onerror = function() {
-      clearTimeout(timeout);
-      delete window[callbackName];
-      reject(new Error("Error de red"));
-    };
-    document.body.appendChild(script);
-  });
-}
-
-// ── Intentar primero con fetch, fallback a JSONP ─────────────────
 window.addEventListener("DOMContentLoaded", function() {
-  document.getElementById("loading-msg").textContent = "Conectando con Google Sheets...";
-
-  fetch(SCRIPT_URL + "?action=getData")
-    .then(function(r) {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
-    })
-    .then(inicializarDatos)
-    .catch(function() {
-      // fetch falló (CORS) → intentar JSONP
-      document.getElementById("loading-msg").textContent = "Cargando vía método alternativo...";
-      return cargarDatosJSONP().then(inicializarDatos);
-    })
-    .catch(function(err) {
-      document.getElementById("loading-overlay").innerHTML =
-        '<div style="text-align:center;padding:30px;color:white;">' +
-        '<div style="font-size:40px;margin-bottom:15px;">⚠️</div>' +
-        '<div style="font-weight:bold;font-size:16px;margin-bottom:10px;">ERROR AL CARGAR DATOS</div>' +
-        '<div style="font-size:12px;opacity:0.8;margin-bottom:20px;">Verificá tu conexión a internet y que el script de Google esté publicado correctamente.</div>' +
-        '<button onclick="location.reload()" style="padding:12px 25px;background:white;color:#0a2d6e;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;">🔄 REINTENTAR</button>' +
-        '</div>';
-    });
+  cargarDatosJSONP();
 });
+
+function cargarDatosJSONP() {
+  document.getElementById("loading-msg").textContent = "CONECTANDO CON GOOGLE SHEETS...";
+
+  // Nombre único para el callback global
+  var cbName = "cahpsa_cb_" + Date.now();
+  var script  = document.createElement("script");
+  var timer;
+
+  // Google llamará a esta función con los datos
+  window[cbName] = function(data) {
+    clearTimeout(timer);
+    if (document.body.contains(script)) document.body.removeChild(script);
+    delete window[cbName];
+
+    if (!data || (!data.pdvMap && !data.productos)) {
+      mostrarErrorCarga("Respuesta vacía del servidor.");
+      return;
+    }
+    inicializarDatos(data);
+  };
+
+  // Timeout de 20 segundos
+  timer = setTimeout(function() {
+    if (document.body.contains(script)) document.body.removeChild(script);
+    delete window[cbName];
+    mostrarErrorCarga("Tiempo de espera agotado. Verificá tu conexión.");
+  }, 20000);
+
+  script.onerror = function() {
+    clearTimeout(timer);
+    delete window[cbName];
+    mostrarErrorCarga("No se pudo conectar con el servidor.");
+  };
+
+  // La URL incluye el parámetro callback para JSONP
+  script.src = SCRIPT_URL + "?action=getData&callback=" + cbName;
+  document.body.appendChild(script);
+}
 
 function inicializarDatos(data) {
   datosPDV = data.pdvMap || {};
@@ -332,82 +320,87 @@ function inicializarDatos(data) {
   document.getElementById("loading-overlay").classList.add("hidden");
 }
 
+function mostrarErrorCarga(detalle) {
+  document.getElementById("loading-overlay").innerHTML =
+    '<div style="text-align:center;padding:30px;color:white;max-width:320px;">' +
+    '<div style="font-size:40px;margin-bottom:15px;">⚠️</div>' +
+    '<div style="font-weight:bold;font-size:15px;margin-bottom:10px;">ERROR AL CARGAR DATOS</div>' +
+    '<div style="font-size:11px;opacity:0.8;margin-bottom:6px;">' + detalle + '</div>' +
+    '<div style="font-size:10px;opacity:0.6;margin-bottom:20px;">Verificá que el script esté publicado con acceso "Cualquier usuario".</div>' +
+    '<button onclick="location.reload()" style="padding:12px 25px;background:white;color:#0a2d6e;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;letter-spacing:1px;">🔄 REINTENTAR</button>' +
+    '</div>';
+}
+
 // ================================================================
 //  UTILIDADES
 // ================================================================
-function normalizarTexto(t) {
+function norm(t) {
   return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
-function resaltarCoincidencia(nombre, query) {
-  const nNorm = normalizarTexto(nombre);
-  const qNorm = normalizarTexto(query);
-  const idx = nNorm.indexOf(qNorm);
-  if (idx === -1) return nombre;
-  return nombre.substring(0, idx) +
-    '<span class="match-highlight">' + nombre.substring(idx, idx + query.length) + '</span>' +
-    nombre.substring(idx + query.length);
+function resaltar(nombre, query) {
+  var n = norm(nombre), q = norm(query);
+  var i = n.indexOf(q);
+  if (i === -1) return nombre;
+  return nombre.substring(0, i) +
+    '<span class="match-highlight">' + nombre.substring(i, i + query.length) + '</span>' +
+    nombre.substring(i + query.length);
 }
 
 // ================================================================
 //  AUTOCOMPLETE RELEVADOR
 // ================================================================
-let highlightedIndex = -1;
+var hiRel = -1;
 
 function onVendedorInput(input) {
   input.value = input.value.toUpperCase();
-  const query = input.value.trim();
-  if (query.length < 2) { cerrarDropdown(); actualizarPDV(); return; }
-  const res = todosLosRelevadores.filter(n => normalizarTexto(n).includes(normalizarTexto(query)));
-  mostrarDropdown(res, query);
+  var q = input.value.trim();
+  if (q.length < 2) { cerrarDDRel(); actualizarPDV(); return; }
+  mostrarDDRel(todosLosRelevadores.filter(function(n){ return norm(n).includes(norm(q)); }), q);
   actualizarPDV();
 }
 function onVendedorFocus() {
-  const query = document.getElementById("vendedor").value.trim();
-  if (query.length >= 2) {
-    const res = todosLosRelevadores.filter(n => normalizarTexto(n).includes(normalizarTexto(query)));
-    mostrarDropdown(res, query);
-  }
+  var q = document.getElementById("vendedor").value.trim();
+  if (q.length >= 2)
+    mostrarDDRel(todosLosRelevadores.filter(function(n){ return norm(n).includes(norm(q)); }), q);
 }
-function onVendedorKeydown(event) {
-  const dd = document.getElementById("vendedor-dropdown");
-  const items = dd.querySelectorAll(".autocomplete-item");
-  if (event.key === "ArrowDown") { event.preventDefault(); highlightedIndex = Math.min(highlightedIndex + 1, items.length - 1); actualizarHighlight(items); }
-  else if (event.key === "ArrowUp") { event.preventDefault(); highlightedIndex = Math.max(highlightedIndex - 1, 0); actualizarHighlight(items); }
-  else if (event.key === "Enter") { event.preventDefault(); if (highlightedIndex >= 0 && items[highlightedIndex]) seleccionarRelevador(items[highlightedIndex].dataset.valor); }
-  else if (event.key === "Escape") cerrarDropdown();
+function onVendedorKeydown(ev) {
+  var dd = document.getElementById("vendedor-dropdown");
+  var items = dd.querySelectorAll(".autocomplete-item");
+  if (ev.key === "ArrowDown")  { ev.preventDefault(); hiRel = Math.min(hiRel+1, items.length-1); hlRel(items); }
+  else if (ev.key === "ArrowUp")   { ev.preventDefault(); hiRel = Math.max(hiRel-1, 0); hlRel(items); }
+  else if (ev.key === "Enter")     { ev.preventDefault(); if (hiRel>=0 && items[hiRel]) selRel(items[hiRel].dataset.valor); }
+  else if (ev.key === "Escape")    cerrarDDRel();
 }
-function actualizarHighlight(items) {
-  items.forEach((it, i) => it.classList.toggle("highlighted", i === highlightedIndex));
-  if (items[highlightedIndex]) items[highlightedIndex].scrollIntoView({ block: "nearest" });
+function hlRel(items) {
+  items.forEach(function(it,i){ it.classList.toggle("highlighted", i===hiRel); });
+  if (items[hiRel]) items[hiRel].scrollIntoView({block:"nearest"});
 }
-function mostrarDropdown(resultados, query) {
-  const dd = document.getElementById("vendedor-dropdown");
-  highlightedIndex = -1;
-  dd.innerHTML = resultados.length === 0
-    ? `<div class="autocomplete-no-results">Sin resultados para "${query}"</div>`
-    : resultados.map(n => `<div class="autocomplete-item" data-valor="${n}" onmousedown="seleccionarRelevador('${n.replace(/'/g,"\\'")}')">
-        ${resaltarCoincidencia(n, query)}</div>`).join("");
+function mostrarDDRel(res, q) {
+  var dd = document.getElementById("vendedor-dropdown"); hiRel = -1;
+  dd.innerHTML = res.length === 0
+    ? '<div class="autocomplete-no-results">Sin resultados para "' + q + '"</div>'
+    : res.map(function(n){
+        return '<div class="autocomplete-item" data-valor="' + n + '" onmousedown="selRel(\'' + n.replace(/'/g,"\\'") + '\')">' + resaltar(n,q) + '</div>';
+      }).join("");
   dd.classList.add("visible");
 }
-function cerrarDropdown() {
-  document.getElementById("vendedor-dropdown").classList.remove("visible");
-  highlightedIndex = -1;
+function cerrarDDRel() {
+  document.getElementById("vendedor-dropdown").classList.remove("visible"); hiRel = -1;
 }
-function seleccionarRelevador(nombre) {
+function selRel(nombre) {
   document.getElementById("vendedor").value = nombre;
-  cerrarDropdown(); actualizarPDV();
+  cerrarDDRel(); actualizarPDV();
 }
-document.addEventListener("click", function(e) {
-  if (!e.target.closest(".autocomplete-wrapper")) {
-    document.querySelectorAll(".autocomplete-dropdown").forEach(d => d.classList.remove("visible"));
-  }
+document.addEventListener("click", function(e){
+  if (!e.target.closest(".autocomplete-wrapper"))
+    document.querySelectorAll(".autocomplete-dropdown").forEach(function(d){ d.classList.remove("visible"); });
 });
 function actualizarPDV() {
-  const rel = document.getElementById("vendedor").value;
-  const sel = document.getElementById("pdv");
+  var rel = document.getElementById("vendedor").value;
+  var sel = document.getElementById("pdv");
   if (datosPDV[rel]) {
     sel.innerHTML = '<option value="">-- SELECCIONE PDV --</option>';
-    datosPDV[rel].forEach(p => { const o = document.createElement("option"); o.value = o.textContent = p; sel.appendChild(o); });
+    datosPDV[rel].forEach(function(p){ var o=document.createElement("option"); o.value=o.textContent=p; sel.appendChild(o); });
   } else {
     sel.innerHTML = '<option value="">-- RELEVADOR NO VÁLIDO --</option>';
   }
@@ -417,87 +410,90 @@ function actualizarPDV() {
 //  TABS
 // ================================================================
 function cambiarTab(t) {
-  ["venc","prox","aver"].forEach(x => {
-    document.getElementById("panel-" + (x==="venc"?"vencidos":x==="prox"?"proximos":"averiados")).style.display = x === t ? "block" : "none";
-    document.getElementById("tab-" + x).className = "btn-tab" + (x === t ? " active-" + x : "");
-  });
+  document.getElementById("panel-vencidos").style.display  = t==="venc" ? "block" : "none";
+  document.getElementById("panel-proximos").style.display  = t==="prox" ? "block" : "none";
+  document.getElementById("panel-averiados").style.display = t==="aver" ? "block" : "none";
+  document.getElementById("tab-venc").className = "btn-tab" + (t==="venc" ? " active-venc" : "");
+  document.getElementById("tab-prox").className = "btn-tab" + (t==="prox" ? " active-prox" : "");
+  document.getElementById("tab-aver").className = "btn-tab" + (t==="aver" ? " active-aver" : "");
 }
 
 // ================================================================
 //  SI / NO
 // ================================================================
-let respuestas = { venc: null, prox: null, aver: null };
+var respuestas = { venc: null, prox: null, aver: null };
 function decidirCarga(tipo, tiene) {
   respuestas[tipo] = tiene;
-  document.getElementById(tipo + "-si").className = tiene  ? "btn-sn active-si" : "btn-sn";
-  document.getElementById(tipo + "-no").className = !tiene ? "btn-sn active-no" : "btn-sn";
-  const id = tipo === "venc" ? "vencidos" : tipo === "prox" ? "proximos" : "averiados";
-  document.getElementById("seccion-" + id).style.display = tiene ? "block" : "none";
-  const cont = document.getElementById("cont-" + id);
+  document.getElementById(tipo+"-si").className = tiene  ? "btn-sn active-si" : "btn-sn";
+  document.getElementById(tipo+"-no").className = !tiene ? "btn-sn active-no" : "btn-sn";
+  var id = tipo==="venc" ? "vencidos" : tipo==="prox" ? "proximos" : "averiados";
+  document.getElementById("seccion-"+id).style.display = tiene ? "block" : "none";
+  var cont = document.getElementById("cont-"+id);
   if (tiene && cont.children.length === 0) agregarFila(tipo);
 }
 
 // ================================================================
 //  AUTOCOMPLETE PRODUCTOS
 // ================================================================
-let prodHighlightIndex = {};
+var hiProd = {};
 
 function onProductoInput(input, uid) {
   input.value = input.value.toUpperCase();
-  const q = input.value.trim();
-  if (q.length < 2) { cerrarDropdownProducto(uid); validarProducto(input); return; }
-  const res = PRODUCTOS_VALIDOS.filter(p => normalizarTexto(p).includes(normalizarTexto(q))).slice(0, 30);
-  mostrarDropdownProducto(uid, res, q);
-  validarProducto(input);
+  var q = input.value.trim();
+  if (q.length < 2) { cerrarDDProd(uid); validarProd(input); return; }
+  var res = PRODUCTOS_VALIDOS.filter(function(p){ return norm(p).includes(norm(q)); }).slice(0,30);
+  mostrarDDProd(uid, res, q);
+  validarProd(input);
 }
 function onProductoFocus(input, uid) {
-  const q = input.value.trim();
+  var q = input.value.trim();
   if (q.length >= 2) {
-    const res = PRODUCTOS_VALIDOS.filter(p => normalizarTexto(p).includes(normalizarTexto(q))).slice(0, 30);
-    mostrarDropdownProducto(uid, res, q);
+    var res = PRODUCTOS_VALIDOS.filter(function(p){ return norm(p).includes(norm(q)); }).slice(0,30);
+    mostrarDDProd(uid, res, q);
   }
 }
-function mostrarDropdownProducto(uid, resultados, query) {
-  const dd = document.getElementById("prod-drop-" + uid);
-  prodHighlightIndex[uid] = -1;
-  dd.innerHTML = resultados.length === 0
-    ? `<div class="autocomplete-no-results">Sin resultados para "${query}"</div>`
-    : resultados.map(p => `<div class="autocomplete-item" data-valor="${p.replace(/"/g,'&quot;')}" onmousedown="seleccionarProducto(this,'${uid}')">
-        ${resaltarCoincidencia(p, query)}</div>`).join("");
+function mostrarDDProd(uid, res, q) {
+  var dd = document.getElementById("prod-drop-"+uid); hiProd[uid] = -1;
+  dd.innerHTML = res.length === 0
+    ? '<div class="autocomplete-no-results">Sin resultados para "' + q + '"</div>'
+    : res.map(function(p){
+        return '<div class="autocomplete-item" data-valor="' + p.replace(/"/g,'&quot;') + '" onmousedown="selProd(this,\'' + uid + '\')">' + resaltar(p,q) + '</div>';
+      }).join("");
   dd.classList.add("visible");
 }
-function cerrarDropdownProducto(uid) {
-  const d = document.getElementById("prod-drop-" + uid);
+function cerrarDDProd(uid) {
+  var d = document.getElementById("prod-drop-"+uid);
   if (d) d.classList.remove("visible");
-  prodHighlightIndex[uid] = -1;
+  hiProd[uid] = -1;
 }
-function seleccionarProducto(item, uid) {
-  document.getElementById("prod-drop-" + uid).closest(".autocomplete-wrapper").querySelector(".p-prod").value = item.dataset.valor;
-  cerrarDropdownProducto(uid);
-  validarProducto(document.getElementById("prod-drop-" + uid).closest(".autocomplete-wrapper").querySelector(".p-prod"));
+function selProd(item, uid) {
+  var wrapper = document.getElementById("prod-drop-"+uid).closest(".autocomplete-wrapper");
+  wrapper.querySelector(".p-prod").value = item.dataset.valor;
+  cerrarDDProd(uid);
+  validarProd(wrapper.querySelector(".p-prod"));
 }
-function onProductoKeydown(event, uid) {
-  const dd = document.getElementById("prod-drop-" + uid);
-  const items = dd.querySelectorAll(".autocomplete-item");
-  if (prodHighlightIndex[uid] === undefined) prodHighlightIndex[uid] = -1;
-  if (event.key === "ArrowDown") { event.preventDefault(); prodHighlightIndex[uid] = Math.min(prodHighlightIndex[uid]+1, items.length-1); items.forEach((it,i)=>it.classList.toggle("highlighted",i===prodHighlightIndex[uid])); if(items[prodHighlightIndex[uid]])items[prodHighlightIndex[uid]].scrollIntoView({block:"nearest"}); }
-  else if (event.key === "ArrowUp") { event.preventDefault(); prodHighlightIndex[uid] = Math.max(prodHighlightIndex[uid]-1, 0); items.forEach((it,i)=>it.classList.toggle("highlighted",i===prodHighlightIndex[uid])); if(items[prodHighlightIndex[uid]])items[prodHighlightIndex[uid]].scrollIntoView({block:"nearest"}); }
-  else if (event.key === "Enter") { event.preventDefault(); if(prodHighlightIndex[uid]>=0&&items[prodHighlightIndex[uid]])seleccionarProducto(items[prodHighlightIndex[uid]],uid); }
-  else if (event.key === "Escape") cerrarDropdownProducto(uid);
+function onProductoKeydown(ev, uid) {
+  var dd = document.getElementById("prod-drop-"+uid);
+  var items = dd.querySelectorAll(".autocomplete-item");
+  if (hiProd[uid] === undefined) hiProd[uid] = -1;
+  if (ev.key==="ArrowDown")  { ev.preventDefault(); hiProd[uid]=Math.min(hiProd[uid]+1,items.length-1); items.forEach(function(it,i){it.classList.toggle("highlighted",i===hiProd[uid]);}); if(items[hiProd[uid]])items[hiProd[uid]].scrollIntoView({block:"nearest"}); }
+  else if (ev.key==="ArrowUp")   { ev.preventDefault(); hiProd[uid]=Math.max(hiProd[uid]-1,0); items.forEach(function(it,i){it.classList.toggle("highlighted",i===hiProd[uid]);}); if(items[hiProd[uid]])items[hiProd[uid]].scrollIntoView({block:"nearest"}); }
+  else if (ev.key==="Enter")     { ev.preventDefault(); if(hiProd[uid]>=0&&items[hiProd[uid]])selProd(items[hiProd[uid]],uid); }
+  else if (ev.key==="Escape")    cerrarDDProd(uid);
 }
-function validarProducto(input) {
-  const row = input.closest(".producto-row");
-  const err = row ? row.querySelector(".msg-error") : null;
-  const valido = input.value === "" || PRODUCTOS_VALIDOS.includes(input.value);
-  input.classList.toggle("input-error", !valido);
-  if (err) err.style.display = valido ? "none" : "block";
+function validarProd(input) {
+  var row = input.closest(".producto-row");
+  var err = row ? row.querySelector(".msg-error") : null;
+  var ok  = input.value==="" || PRODUCTOS_VALIDOS.includes(input.value);
+  input.classList.toggle("input-error", !ok);
+  if (err) err.style.display = ok ? "none" : "block";
 }
 
 // ================================================================
 //  CHECKLIST AVERÍA
 // ================================================================
 function toggleOtros(checkbox) {
-  const inp = checkbox.closest(".producto-row").querySelector(".input-otros-especificar");
+  var inp = checkbox.closest(".producto-row").querySelector(".input-otros-especificar");
   inp.style.display = checkbox.checked ? "block" : "none";
   if (!checkbox.checked) inp.value = "";
 }
@@ -506,43 +502,41 @@ function toggleOtros(checkbox) {
 //  AGREGAR FILA
 // ================================================================
 function agregarFila(tipo) {
-  const idCont = tipo === "venc" ? "vencidos" : tipo === "prox" ? "proximos" : "averiados";
-  const cont = document.getElementById("cont-" + idCont);
-  const div = document.createElement("div");
+  var idCont = tipo==="venc" ? "vencidos" : tipo==="prox" ? "proximos" : "averiados";
+  var cont = document.getElementById("cont-"+idCont);
+  var div  = document.createElement("div");
   div.className = "producto-row";
-  div.style.borderLeftColor = tipo === "venc" ? "var(--amarillo-venc)" : tipo === "prox" ? "var(--naranja-prox)" : "var(--rojo-alerta)";
+  div.style.borderLeftColor = tipo==="venc" ? "var(--amarillo-venc)" : tipo==="prox" ? "var(--naranja-prox)" : "var(--rojo-alerta)";
 
-  const uid = Date.now() + Math.random().toString(36).slice(2);
+  var uid = Date.now() + Math.random().toString(36).slice(2);
 
-  const campoFecha = `<div style="flex:2"><label>FECHA DE VENCIMIENTO</label><input type="date" class="p-extra" required></div>`;
-  const camposAver = `<div style="flex:2"><label>TIPO DE AVERÍA</label>
-    <div class="checklist-container">
-      <label class="check-item"><input type="checkbox" value="CAJA MOJADA"> CAJA MOJADA</label>
-      <label class="check-item"><input type="checkbox" value="PRODUCTO CONSUMIDO EN PDV"> PRODUCTO CONSUMIDO EN PDV</label>
-      <label class="check-item"><input type="checkbox" value="CAJA APLASTADA"> CAJA APLASTADA</label>
-      <label class="check-item"><input type="checkbox" value="CAJA ROTA"> CAJA ROTA</label>
-      <label class="check-item"><input type="checkbox" value="PRODUCTO DAÑADO POR ROEDORES"> PRODUCTO DAÑADO POR ROEDORES</label>
-      <label class="check-item"><input type="checkbox" value="OTROS" onchange="toggleOtros(this)"> OTROS (ESPECIFICAR)</label>
-      <input type="text" class="input-otros-especificar" placeholder="ESCRIBA EL MOTIVO..."
-        style="display:none;margin-top:5px;padding:10px;" oninput="this.value=this.value.toUpperCase()">
-    </div></div>`;
+  var campoFecha = '<div style="flex:2"><label>FECHA DE VENCIMIENTO</label><input type="date" class="p-extra" required></div>';
+  var camposAver = '<div style="flex:2"><label>TIPO DE AVERÍA</label>' +
+    '<div class="checklist-container">' +
+    '<label class="check-item"><input type="checkbox" value="CAJA MOJADA"> CAJA MOJADA</label>' +
+    '<label class="check-item"><input type="checkbox" value="PRODUCTO CONSUMIDO EN PDV"> PRODUCTO CONSUMIDO EN PDV</label>' +
+    '<label class="check-item"><input type="checkbox" value="CAJA APLASTADA"> CAJA APLASTADA</label>' +
+    '<label class="check-item"><input type="checkbox" value="CAJA ROTA"> CAJA ROTA</label>' +
+    '<label class="check-item"><input type="checkbox" value="PRODUCTO DAÑADO POR ROEDORES"> PRODUCTO DAÑADO POR ROEDORES</label>' +
+    '<label class="check-item"><input type="checkbox" value="OTROS" onchange="toggleOtros(this)"> OTROS (ESPECIFICAR)</label>' +
+    '<input type="text" class="input-otros-especificar" placeholder="ESCRIBA EL MOTIVO..." style="display:none;margin-top:5px;padding:10px;" oninput="this.value=this.value.toUpperCase()">' +
+    '</div></div>';
 
-  div.innerHTML = `
-    <label>PRODUCTO (SELECCIÓN OBLIGATORIA)</label>
-    <div class="autocomplete-wrapper">
-      <input type="text" class="p-prod" placeholder="BUSCAR PRODUCTO..." required autocomplete="off"
-        oninput="onProductoInput(this,'${uid}')"
-        onkeydown="onProductoKeydown(event,'${uid}')"
-        onfocus="onProductoFocus(this,'${uid}')">
-      <div class="autocomplete-dropdown" id="prod-drop-${uid}"></div>
-    </div>
-    <span class="msg-error">⚠️ DEBE SELECCIONAR UN PRODUCTO DE LA LISTA</span>
-    <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
-      ${tipo === "aver" ? camposAver : campoFecha}
-      <div style="flex:1"><label>CANTIDAD (OBLIGATORIO)</label><input type="number" class="p-cant" min="1" placeholder="EJ: 5" required></div>
-    </div>
-    <button type="button" class="btn-remove" onclick="this.parentElement.remove()">ELIMINAR</button>
-    <div style="clear:both"></div>`;
+  div.innerHTML =
+    '<label>PRODUCTO (SELECCIÓN OBLIGATORIA)</label>' +
+    '<div class="autocomplete-wrapper">' +
+    '<input type="text" class="p-prod" placeholder="BUSCAR PRODUCTO..." required autocomplete="off"' +
+    ' oninput="onProductoInput(this,\'' + uid + '\')"' +
+    ' onkeydown="onProductoKeydown(event,\'' + uid + '\')"' +
+    ' onfocus="onProductoFocus(this,\'' + uid + '\')">' +
+    '<div class="autocomplete-dropdown" id="prod-drop-' + uid + '"></div></div>' +
+    '<span class="msg-error">⚠️ DEBE SELECCIONAR UN PRODUCTO DE LA LISTA</span>' +
+    '<div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">' +
+    (tipo==="aver" ? camposAver : campoFecha) +
+    '<div style="flex:1"><label>CANTIDAD (OBLIGATORIO)</label><input type="number" class="p-cant" min="1" placeholder="EJ: 5" required></div>' +
+    '</div>' +
+    '<button type="button" class="btn-remove" onclick="this.parentElement.remove()">ELIMINAR</button>' +
+    '<div style="clear:both"></div>';
   cont.appendChild(div);
 }
 
@@ -552,28 +546,28 @@ function agregarFila(tipo) {
 document.getElementById("formulario").onsubmit = function(e) {
   e.preventDefault();
 
-  if (respuestas.venc === null || respuestas.prox === null || respuestas.aver === null) {
+  if (respuestas.venc===null || respuestas.prox===null || respuestas.aver===null) {
     alert("DEBE COMPLETAR TODOS LOS APARTADOS (VENCIDOS, PRÓXIMOS Y AVERIADOS)."); return;
   }
   if (!datosPDV[document.getElementById("vendedor").value]) {
     alert("POR FAVOR SELECCIONE UN RELEVADOR VÁLIDO DE LA LISTA."); return;
   }
 
-  let hayErrores = false;
-  document.querySelectorAll(".p-prod").forEach(input => {
+  var hayErr = false;
+  document.querySelectorAll(".p-prod").forEach(function(input){
     if (!PRODUCTOS_VALIDOS.includes(input.value)) {
       input.classList.add("input-error");
-      const err = input.closest(".producto-row") ? input.closest(".producto-row").querySelector(".msg-error") : null;
+      var err = input.closest(".producto-row") ? input.closest(".producto-row").querySelector(".msg-error") : null;
       if (err) err.style.display = "block";
-      hayErrores = true;
+      hayErr = true;
     }
   });
-  if (hayErrores) { alert("❌ HAY PRODUCTOS NO VÁLIDOS EN LA LISTA."); return; }
+  if (hayErr) { alert("❌ HAY PRODUCTOS NO VÁLIDOS EN LA LISTA."); return; }
 
-  const btn = document.getElementById("btnEnvio");
+  var btn = document.getElementById("btnEnvio");
   btn.disabled = true; btn.innerText = "ENVIANDO...";
 
-  const payload = {
+  var payload = {
     relevador:      document.getElementById("vendedor").value,
     pdv:            document.getElementById("pdv").value,
     tieneVencidos:  respuestas.venc,
@@ -582,38 +576,38 @@ document.getElementById("formulario").onsubmit = function(e) {
     vencidos: [], proximos: [], averiados: []
   };
 
-  document.querySelectorAll("#cont-vencidos .producto-row").forEach(r => {
+  document.querySelectorAll("#cont-vencidos .producto-row").forEach(function(r){
     payload.vencidos.push({ producto: r.querySelector(".p-prod").value, fecha: r.querySelector(".p-extra").value, cant: r.querySelector(".p-cant").value });
   });
-  document.querySelectorAll("#cont-proximos .producto-row").forEach(r => {
+  document.querySelectorAll("#cont-proximos .producto-row").forEach(function(r){
     payload.proximos.push({ producto: r.querySelector(".p-prod").value, fecha: r.querySelector(".p-extra").value, cant: r.querySelector(".p-cant").value });
   });
 
-  let checklistValido = true;
-  document.querySelectorAll("#cont-averiados .producto-row").forEach(r => {
-    let sel = [];
-    r.querySelectorAll(".checklist-container input[type='checkbox']:checked").forEach(chk => {
-      sel.push(chk.value === "OTROS" ? "OTROS: " + (r.querySelector(".input-otros-especificar").value || "SIN ESPECIFICAR") : chk.value);
+  var checkOk = true;
+  document.querySelectorAll("#cont-averiados .producto-row").forEach(function(r){
+    var sel = [];
+    r.querySelectorAll(".checklist-container input[type='checkbox']:checked").forEach(function(chk){
+      sel.push(chk.value==="OTROS" ? "OTROS: "+(r.querySelector(".input-otros-especificar").value||"SIN ESPECIFICAR") : chk.value);
     });
-    if (sel.length === 0) {
+    if (sel.length===0) {
       alert("POR FAVOR SELECCIONE AL MENOS UN TIPO DE AVERÍA.");
-      btn.disabled = false; btn.innerText = "ENVIAR REPORTE";
-      checklistValido = false; return;
+      btn.disabled=false; btn.innerText="ENVIAR REPORTE"; checkOk=false; return;
     }
     payload.averiados.push({ producto: r.querySelector(".p-prod").value, observacion: sel.join(" | "), cant: r.querySelector(".p-cant").value });
   });
-  if (!checklistValido) return;
+  if (!checkOk) return;
 
+  // El POST sigue usando fetch con no-cors (esto funciona bien para escribir)
   fetch(SCRIPT_URL, {
     method: "POST",
     mode: "no-cors",
     body: JSON.stringify(payload)
-  }).then(() => {
+  }).then(function(){
     alert("✅ REPORTE ENVIADO CORRECTAMENTE — CAHPSA");
     location.reload();
-  }).catch(() => {
+  }).catch(function(){
     alert("❌ ERROR AL ENVIAR. VERIFICÁ TU CONEXIÓN.");
-    btn.disabled = false; btn.innerText = "ENVIAR REPORTE";
+    btn.disabled=false; btn.innerText="ENVIAR REPORTE";
   });
 };
 </script>
